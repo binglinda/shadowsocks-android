@@ -20,27 +20,25 @@
 
 package com.github.shadowsocks
 
-import android.content.SharedPreferences
-import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.os.Bundle
 import android.support.design.widget.Snackbar
 import android.support.v14.preference.SwitchPreference
-import be.mygod.preference.PreferenceFragment
-import com.github.shadowsocks.utils.{Key, TcpFastOpen}
+import android.support.v7.preference.Preference
 import com.github.shadowsocks.ShadowsocksApplication.app
+import com.github.shadowsocks.bg.ServiceState
+import com.github.shadowsocks.utils.{Key, TcpFastOpen}
+import com.takisoft.fix.support.v7.preference.PreferenceFragmentCompatDividers
 
-class GlobalConfigFragment extends PreferenceFragment with OnSharedPreferenceChangeListener {
-  override def onCreatePreferences(bundle: Bundle, key: String) {
+class GlobalConfigFragment extends PreferenceFragmentCompatDividers {
+  override def onCreatePreferencesFix(bundle: Bundle, key: String) {
+    getPreferenceManager.setPreferenceDataStore(app.dataStore)
+    app.dataStore.initGlobal()
     addPreferencesFromResource(R.xml.pref_global)
     val switch = findPreference(Key.isAutoConnect).asInstanceOf[SwitchPreference]
     switch.setOnPreferenceChangeListener((_, value) => {
       BootReceiver.setEnabled(getActivity, value.asInstanceOf[Boolean])
       true
     })
-    if (getPreferenceManager.getSharedPreferences.getBoolean(Key.isAutoConnect, false)) {
-      BootReceiver.setEnabled(getActivity, true)
-      getPreferenceManager.getSharedPreferences.edit.remove(Key.isAutoConnect).apply()
-    }
     switch.setChecked(BootReceiver.getEnabled(getActivity))
 
     val tfo = findPreference(Key.tfo).asInstanceOf[SwitchPreference]
@@ -56,16 +54,38 @@ class GlobalConfigFragment extends PreferenceFragment with OnSharedPreferenceCha
       tfo.setEnabled(false)
       tfo.setSummary(getString(R.string.tcp_fastopen_summary_unsupported, java.lang.System.getProperty("os.version")))
     }
-    app.settings.registerOnSharedPreferenceChangeListener(this)
+
+    val serviceMode = findPreference(Key.serviceMode)
+    val portProxy = findPreference(Key.portProxy)
+    val portLocalDns = findPreference(Key.portLocalDns)
+    val portTransproxy = findPreference(Key.portTransproxy)
+    def onServiceModeChange(p: Preference, v: Any) = {
+      val (enabledLocalDns, enabledTransproxy) = v match {
+        case Key.modeProxy => (false, false)
+        case Key.modeVpn => (true, false)
+        case Key.modeTransproxy => (true, true)
+      }
+      portLocalDns.setEnabled(enabledLocalDns)
+      portTransproxy.setEnabled(enabledTransproxy)
+      true
+    }
+    MainActivity.stateListener = {
+      case ServiceState.IDLE | ServiceState.STOPPED =>
+        serviceMode.setEnabled(true)
+        portProxy.setEnabled(true)
+        onServiceModeChange(null, app.dataStore.serviceMode)
+      case _ =>
+        serviceMode.setEnabled(false)
+        portProxy.setEnabled(false)
+        portLocalDns.setEnabled(false)
+        portTransproxy.setEnabled(false)
+    }
+    MainActivity.stateListener(getActivity.asInstanceOf[MainActivity].state)
+    serviceMode.setOnPreferenceChangeListener(onServiceModeChange)
   }
 
   override def onDestroy() {
-    app.settings.unregisterOnSharedPreferenceChangeListener(this)
+    MainActivity.stateListener = null
     super.onDestroy()
-  }
-
-  def onSharedPreferenceChanged(pref: SharedPreferences, key: String): Unit = key match {
-    case Key.isNAT => findPreference(key).asInstanceOf[SwitchPreference].setChecked(pref.getBoolean(key, false))
-    case _ =>
   }
 }

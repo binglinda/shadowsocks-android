@@ -1,12 +1,11 @@
 ## Shadowsocks for Android
 
-A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.
+[![Build Status](https://api.travis-ci.org/shadowsocks/shadowsocks-android.svg)](https://travis-ci.org/shadowsocks/shadowsocks-android)
+[![Releases](https://img.shields.io/github/downloads/shadowsocks/shadowsocks-android/total.svg)](https://github.com/shadowsocks/shadowsocks-android/releases)
 
+A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.  
 <a href="https://play.google.com/store/apps/details?id=com.github.shadowsocks"><img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png" height="48"></a>
 
-### CI STATUS
-
-[![Build Status](https://api.travis-ci.org/shadowsocks/shadowsocks-android.svg)](https://travis-ci.org/shadowsocks/shadowsocks-android)
 
 ### PREREQUISITES
 
@@ -14,9 +13,9 @@ A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.
 * SBT 0.13.0+
 * Go 1.4+
 * Android SDK
-  - Build Tools 25+
+  - Build Tools 26+
   - Android Support Repository and Google Repository (see `build.sbt` for version)
-  - Android NDK r14+
+  - Android NDK r16+
 
 ### BUILD
 
@@ -47,13 +46,13 @@ Translators can go to [POEditor](https://poeditor.com/join/project/u5VHO9vhSf) t
 <ul>
     <li>redsocks: <a href="https://github.com/shadowsocks/redsocks/blob/shadowsocks-android/README">APL 2.0</a></li>
     <li>mbed TLS: <a href="https://github.com/ARMmbed/mbedtls/blob/development/LICENSE">APL 2.0</a></li>
-    <li>libevent: <a href="https://github.com/shadowsocks/shadowsocks-android/blob/master/src/main/jni/libevent/LICENSE">BSD</a></li>
+    <li>libevent: <a href="https://github.com/shadowsocks/libevent/blob/master/LICENSE">BSD</a></li>
     <li>tun2socks: <a href="https://github.com/shadowsocks/badvpn/blob/shadowsocks-android/COPYING">BSD</a></li>
     <li>pcre: <a href="https://android.googlesource.com/platform/external/pcre/+/master/dist2/LICENCE">BSD</a></li>
     <li>libancillary: <a href="https://github.com/shadowsocks/libancillary/blob/shadowsocks-android/COPYING">BSD</a></li>
     <li>shadowsocks-libev: <a href="https://github.com/shadowsocks/shadowsocks-libev/blob/master/LICENSE">GPLv3</a></li>
     <li>overture: <a href="https://github.com/shawn1m/overture/blob/master/LICENSE">MIT</a></li>
-    <li>libev: <a href="https://github.com/shadowsocks/shadowsocks-libev/blob/master/libev/LICENSE">GPLv2</a></li>
+    <li>libev: <a href="https://github.com/shadowsocks/libev/blob/master/LICENSE">GPLv2</a></li>
     <li>libsodium: <a href="https://github.com/jedisct1/libsodium/blob/master/LICENSE">ISC</a></li>
     <li>libudns: <a href="https://github.com/shadowsocks/libudns/blob/master/COPYING.LGPL">LGPL</a></li>
 </ul>

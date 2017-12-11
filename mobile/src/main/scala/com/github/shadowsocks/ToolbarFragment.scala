@@ -20,8 +20,8 @@
 
 package com.github.shadowsocks
 
-import android.app.Fragment
 import android.os.Bundle
+import android.support.v4.app.Fragment
 import android.support.v7.widget.Toolbar
 import android.view.View
 
@@ -30,7 +30,7 @@ class ToolbarFragment extends Fragment {
 
   override def onViewCreated(view: View, savedInstanceState: Bundle) {
     super.onViewCreated(view, savedInstanceState)
-    toolbar = view.findViewById(R.id.toolbar).asInstanceOf[Toolbar]
+    toolbar = view.findViewById[Toolbar](R.id.toolbar)
     val activity = getActivity.asInstanceOf[MainActivity]
     if (activity.crossfader == null) activity.drawer.setToolbar(activity, toolbar, true)
   }

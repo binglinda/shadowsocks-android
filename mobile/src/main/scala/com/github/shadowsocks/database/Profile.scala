@@ -22,12 +22,11 @@ package com.github.shadowsocks.database
 
 import java.util.Locale
 
-import android.content.SharedPreferences
 import android.net.Uri
-import android.os.Binder
 import android.util.Base64
 import com.github.shadowsocks.plugin.PluginConfiguration
-import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.preference.OrmLitePreferenceDataStore
+import com.github.shadowsocks.utils.{Key, Utils}
 import com.j256.ormlite.field.{DataType, DatabaseField}
 
 class Profile {
@@ -39,10 +38,6 @@ class Profile {
 
   @DatabaseField
   var host: String = "198.199.101.152"
-
-  // hopefully hashCode = mHandle doesn't change, currently this is true from KitKat to Nougat
-  @DatabaseField
-  var localPort: Int = 1080 + Binder.getCallingUserHandle.hashCode
 
   @DatabaseField
   var remotePort: Int = 8388
@@ -108,37 +103,36 @@ class Profile {
   }
   override def toString: String = toUri.toString
 
-  def serialize(editor: SharedPreferences.Editor): SharedPreferences.Editor = editor
-    .putString(Key.name, name)
-    .putString(Key.host, host)
-    .putInt(Key.localPort, localPort)
-    .putInt(Key.remotePort, remotePort)
-    .putString(Key.password, password)
-    .putString(Key.route, route)
-    .putString(Key.remoteDns, remoteDns)
-    .putString(Key.method, method)
-    .putBoolean(Key.proxyApps, proxyApps)
-    .putBoolean(Key.bypass, bypass)
-    .putBoolean(Key.udpdns, udpdns)
-    .putBoolean(Key.ipv6, ipv6)
-    .putString(Key.individual, individual)
-    .putString(Key.plugin, plugin)
-    .remove(Key.dirty)
-  def deserialize(pref: SharedPreferences) {
+  def serialize(store: OrmLitePreferenceDataStore) {
+    store.putString(Key.name, name)
+    store.putString(Key.host, host)
+    store.putString(Key.remotePort, remotePort.toString)
+    store.putString(Key.password, password)
+    store.putString(Key.route, route)
+    store.putString(Key.remoteDns, remoteDns)
+    store.putString(Key.method, method)
+    store.proxyApps = proxyApps
+    store.bypass = bypass
+    store.putBoolean(Key.udpdns, udpdns)
+    store.putBoolean(Key.ipv6, ipv6)
+    store.individual = individual
+    store.plugin = plugin
+    store.remove(Key.dirty)
+  }
+  def deserialize(store: OrmLitePreferenceDataStore) {
     // It's assumed that default values are never used, so 0/false/null is always used even if that isn't the case
-    name = pref.getString(Key.name, null)
-    host = pref.getString(Key.host, null)
-    localPort = pref.getInt(Key.localPort, 0)
-    remotePort = pref.getInt(Key.remotePort, 0)
-    password = pref.getString(Key.password, null)
-    method = pref.getString(Key.method, null)
-    route = pref.getString(Key.route, null)
-    remoteDns = pref.getString(Key.remoteDns, null)
-    proxyApps = pref.getBoolean(Key.proxyApps, false)
-    bypass = pref.getBoolean(Key.bypass, false)
-    udpdns = pref.getBoolean(Key.udpdns, false)
-    ipv6 = pref.getBoolean(Key.ipv6, false)
-    individual = pref.getString(Key.individual, null)
-    plugin = pref.getString(Key.plugin, null)
+    name = store.getString(Key.name, null)
+    host = store.getString(Key.host, null)
+    remotePort = Utils.parsePort(store.getString(Key.remotePort), 8388, 1)
+    password = store.getString(Key.password, null)
+    method = store.getString(Key.method, null)
+    route = store.getString(Key.route, null)
+    remoteDns = store.getString(Key.remoteDns, null)
+    proxyApps = store.proxyApps
+    bypass = store.bypass
+    udpdns = store.getBoolean(Key.udpdns, false)
+    ipv6 = store.getBoolean(Key.ipv6, false)
+    individual = store.individual
+    plugin = store.plugin
   }
 }

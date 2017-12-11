@@ -23,20 +23,19 @@ package com.github.shadowsocks
 import android.app.Activity
 import android.content.{DialogInterface, Intent}
 import android.os.Bundle
-import android.support.v7.app.AlertDialog
+import android.support.v7.app.{AlertDialog, AppCompatActivity}
 import android.support.v7.widget.Toolbar
 import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.plugin.PluginContract
-import com.github.shadowsocks.utils.Key
 
 object ProfileConfigActivity {
   final val REQUEST_CODE_PLUGIN_HELP = 1
 }
 
-class ProfileConfigActivity extends Activity {
+class ProfileConfigActivity extends AppCompatActivity {
   import ProfileConfigActivity._
 
-  private lazy val child = getFragmentManager.findFragmentById(R.id.content).asInstanceOf[ProfileConfigFragment]
+  private lazy val child = getSupportFragmentManager.findFragmentById(R.id.content).asInstanceOf[ProfileConfigFragment]
 
   override def onCreate(savedInstanceState: Bundle) {
     super.onCreate(savedInstanceState)
@@ -49,7 +48,7 @@ class ProfileConfigActivity extends Activity {
     toolbar.setOnMenuItemClickListener(child)
   }
 
-  override def onBackPressed(): Unit = if (app.settings.getBoolean(Key.dirty, false)) new AlertDialog.Builder(this)
+  override def onBackPressed(): Unit = if (app.dataStore.dirty) new AlertDialog.Builder(this)
     .setTitle(R.string.unsaved_changes_prompt)
     .setPositiveButton(R.string.yes, ((_, _) => child.saveAndExit()): DialogInterface.OnClickListener)
     .setNegativeButton(R.string.no, ((_, _) => finish()): DialogInterface.OnClickListener)

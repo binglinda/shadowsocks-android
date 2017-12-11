@@ -21,30 +21,30 @@
 package com.github.shadowsocks
 
 import java.io.{File, FileOutputStream, IOException}
-import java.util
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 import android.annotation.SuppressLint
-import android.app.Application
+import android.app.{Application, NotificationChannel, NotificationManager}
 import android.content._
+import android.content.pm.{PackageInfo, PackageManager}
 import android.content.res.Configuration
 import android.os.{Build, LocaleList}
-import android.preference.PreferenceManager
 import android.support.v7.app.AppCompatDelegate
 import android.util.Log
 import com.evernote.android.job.JobManager
 import com.github.shadowsocks.acl.DonaldTrump
+import com.github.shadowsocks.bg.{ProxyService, TransproxyService, VpnService}
 import com.github.shadowsocks.database.{DBHelper, Profile, ProfileManager}
+import com.github.shadowsocks.preference.{BottomSheetPreferenceDialogFragment, IconListPreference, OrmLitePreferenceDataStore}
 import com.github.shadowsocks.utils.CloseUtils._
 import com.github.shadowsocks.utils._
 import com.google.android.gms.analytics.{GoogleAnalytics, HitBuilders, StandardExceptionParser, Tracker}
-import com.google.android.gms.common.api.ResultCallback
-import com.google.android.gms.tagmanager.{ContainerHolder, TagManager}
+import com.google.firebase.FirebaseApp
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.j256.ormlite.logger.LocalLog
-import eu.chainfire.libsuperuser.Shell
+import com.takisoft.fix.support.v7.preference.PreferenceFragmentCompat
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.JavaConversions._
 
 object ShadowsocksApplication {
   var app: ShadowsocksApplication = _
@@ -61,15 +61,18 @@ object ShadowsocksApplication {
 class ShadowsocksApplication extends Application {
   import ShadowsocksApplication._
 
-  final val SIG_FUNC = "getSignature"
-  var containerHolder: ContainerHolder = _
+  lazy val remoteConfig: FirebaseRemoteConfig = FirebaseRemoteConfig.getInstance()
   lazy val tracker: Tracker = GoogleAnalytics.getInstance(this).newTracker(R.xml.tracker)
-  lazy val settings: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
-  lazy val editor: SharedPreferences.Editor = settings.edit
-  lazy val profileManager = new ProfileManager(new DBHelper(this))
+  private lazy val dbHelper = new DBHelper(this)
+  lazy val profileManager = new ProfileManager(dbHelper)
+  lazy val dataStore = new OrmLitePreferenceDataStore(dbHelper)
 
-  def isNatEnabled: Boolean = settings.getBoolean(Key.isNAT, false)
-  def isVpnEnabled: Boolean = !isNatEnabled
+  def usingVpnMode: Boolean = dataStore.serviceMode == Key.modeVpn
+  def serviceClass: Class[_] = app.dataStore.serviceMode match {
+    case Key.modeProxy => classOf[ProxyService]
+    case Key.modeVpn => classOf[VpnService]
+    case Key.modeTransproxy => classOf[TransproxyService]
+  }
 
   // send event
   def track(category: String, action: String): Unit = tracker.send(new HitBuilders.EventBuilder()
@@ -81,19 +84,17 @@ class ShadowsocksApplication extends Application {
     .setFatal(false)
     .build())
 
-  def profileId: Int = settings.getInt(Key.id, 0)
-  def profileId(i: Int): Unit = editor.putInt(Key.id, i).apply()
-  def currentProfile: Option[Profile] = profileManager.getProfile(profileId)
+  def currentProfile: Option[Profile] = profileManager.getProfile(dataStore.profileId)
 
   def switchProfile(id: Int): Profile = {
     val result = profileManager.getProfile(id) getOrElse profileManager.createProfile()
-    profileId(result.id)
+    dataStore.profileId = result.id
     result
   }
 
   private def checkChineseLocale(locale: Locale): Locale = if (locale.getLanguage == "zh") locale.getCountry match {
-    case "CN" | "TW" => null            // already supported
-    case _ => locale.getScript match {  // fallback to the corresponding script
+    case "CN" | "TW" => null
+    case _ => (if (Build.VERSION.SDK_INT >= 21) locale.getScript else null) match {
       case "Hans" => SIMPLIFIED_CHINESE
       case "Hant" => TRADITIONAL_CHINESE
       case script =>
@@ -102,7 +103,8 @@ class ShadowsocksApplication extends Application {
           case "SG" => SIMPLIFIED_CHINESE
           case "HK" | "MO" => TRADITIONAL_CHINESE
           case _ =>
-            Log.w(TAG, "Unknown zh locale: %s. Falling back to zh-Hans-CN...".format(locale.toLanguageTag))
+            Log.w(TAG, "Unknown zh locale: %s. Falling back to zh-Hans-CN..."
+              .formatLocal(Locale.ENGLISH, if (Build.VERSION.SDK_INT >= 21) locale.toLanguageTag else locale))
             SIMPLIFIED_CHINESE
         }
     }
@@ -149,55 +151,37 @@ class ShadowsocksApplication extends Application {
     if (!BuildConfig.DEBUG) java.lang.System.setProperty(LocalLog.LOCAL_LOG_LEVEL_PROPERTY, "ERROR")
     AppCompatDelegate.setCompatVectorFromResourcesEnabled(true)
     checkChineseLocale(getResources.getConfiguration)
-    val tm = TagManager.getInstance(this)
-    val pending = tm.loadContainerPreferNonDefault("GTM-NT8WS8", R.raw.gtm_default_container)
-    val callback = new ResultCallback[ContainerHolder] {
-      override def onResult(holder: ContainerHolder) {
-        if (!holder.getStatus.isSuccess) {
-          return
-        }
-        containerHolder = holder
-        val container = holder.getContainer
-        container.registerFunctionCallMacroCallback(SIG_FUNC,
-          (functionName: String, parameters: util.Map[String, AnyRef]) => {
-            if (functionName == SIG_FUNC) {
-              Utils.getSignature(getApplicationContext)
-            }
-            null
-          })
-      }
-    }
-    pending.setResultCallback(callback, 2, TimeUnit.SECONDS)
+
+    FirebaseApp.initializeApp(this)
+    remoteConfig.setDefaults(R.xml.default_configs)
+    remoteConfig.fetch().addOnCompleteListener(task =>
+        if (task.isSuccessful) remoteConfig.activateFetched() else Log.e(TAG, "Failed to fetch config"))
+
     JobManager.create(this).addJobCreator(DonaldTrump)
+    PreferenceFragmentCompat.registerPreferenceFragment(classOf[IconListPreference],
+      classOf[BottomSheetPreferenceDialogFragment])
 
-    TcpFastOpen.enabled(settings.getBoolean(Key.tfo, TcpFastOpen.sendEnabled))
-  }
+    TcpFastOpen.enabled(dataStore.getBoolean(Key.tfo, TcpFastOpen.sendEnabled))
 
-  def refreshContainerHolder() {
-    val holder = app.containerHolder
-    if (holder != null) holder.refresh()
-  }
+    if (dataStore.getLong(Key.assetUpdateTime, -1) != info.lastUpdateTime) copyAssets()
 
-  def crashRecovery() {
-    val cmd = new ArrayBuffer[String]()
-
-    for (task <- Executable.EXECUTABLES) {
-      cmd.append("killall lib%s.so".formatLocal(Locale.ENGLISH, task))
-      cmd.append("rm -f %1$s/%2$s-nat.conf %1$s/%2$s-vpn.conf"
-        .formatLocal(Locale.ENGLISH, getFilesDir.getAbsolutePath, task))
+    if (Build.VERSION.SDK_INT >= 26) {
+      val nm = getSystemService(classOf[NotificationManager])
+      nm.createNotificationChannels(List(
+        new NotificationChannel("service-vpn", getText(R.string.service_vpn), NotificationManager.IMPORTANCE_LOW),
+        new NotificationChannel("service-proxy", getText(R.string.service_proxy), NotificationManager.IMPORTANCE_LOW),
+        new NotificationChannel("service-transproxy", getText(R.string.service_transproxy),
+          NotificationManager.IMPORTANCE_LOW)
+      ))
+      nm.deleteNotificationChannel("service-nat") // NAT mode is gone for good
     }
-    if (app.isNatEnabled) {
-      cmd.append("iptables -t nat -F OUTPUT")
-      cmd.append("echo done")
-      val result = Shell.SU.run(cmd.toArray)
-      if (result != null && !result.isEmpty) return // fallback to SH
-    }
-    Shell.SH.run(cmd.toArray)
   }
+
+  lazy val info: PackageInfo = getPackageManager.getPackageInfo(getPackageName, PackageManager.GET_SIGNATURES)
 
   def copyAssets() {
     val assetManager = getAssets
-    for (dir <- List("acl", "overture")) {
+    for (dir <- Array("acl", "overture")) {
       var files: Array[String] = null
       try files = assetManager.list(dir) catch {
         case e: IOException =>
@@ -208,10 +192,8 @@ class ShadowsocksApplication extends Application {
         autoClose(new FileOutputStream(new File(getFilesDir, file)))(out =>
           IOUtils.copy(in, out)))
     }
-    editor.putInt(Key.currentVersionCode, BuildConfig.VERSION_CODE).apply()
+    dataStore.putLong(Key.assetUpdateTime, info.lastUpdateTime)
   }
-
-  def updateAssets(): Unit = if (settings.getInt(Key.currentVersionCode, -1) != BuildConfig.VERSION_CODE) copyAssets()
 
   def listenForPackageChanges(callback: => Unit): BroadcastReceiver = {
     val filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED)

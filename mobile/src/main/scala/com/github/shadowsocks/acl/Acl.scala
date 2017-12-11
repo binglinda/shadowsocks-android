@@ -1,7 +1,9 @@
 package com.github.shadowsocks.acl
 
 import java.io.{File, FileNotFoundException}
+import java.net.URL
 
+import android.util.Log
 import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.utils.IOUtils
 import com.j256.ormlite.field.DatabaseField
@@ -17,17 +19,22 @@ import scala.io.Source
   * @author Mygod
   */
 class Acl {
+  import Acl._
+
   @DatabaseField(generatedId = true)
   var id: Int = _
   val bypassHostnames = new mutable.SortedList[String]()
   val proxyHostnames = new mutable.SortedList[String]()
   val subnets = new mutable.SortedList[Subnet]()
+  val urls = new mutable.SortedList[URL]()(urlOrdering)
+
   @DatabaseField
   var bypass: Boolean = _
 
   def getBypassHostnamesString: String = bypassHostnames.mkString("\n")
   def getProxyHostnamesString: String = proxyHostnames.mkString("\n")
   def getSubnetsString: String = subnets.mkString("\n")
+  def getUrlsString: String = urls.mkString("\n")
   def setBypassHostnamesString(value: String) {
     bypassHostnames.clear()
     bypassHostnames ++= value.split("\n")
@@ -40,6 +47,10 @@ class Acl {
     subnets.clear()
     subnets ++= value.split("\n").map(Subnet.fromString)
   }
+  def setUrlsString(value: String) {
+    urls.clear()
+    urls ++= value.split("\n").map(new URL(_))
+  }
 
   def fromAcl(other: Acl): Acl = {
     bypassHostnames.clear()
@@ -48,6 +59,8 @@ class Acl {
     proxyHostnames ++= other.proxyHostnames
     subnets.clear()
     subnets ++= other.subnets
+    urls.clear()
+    urls ++= other.urls
     bypass = other.bypass
     this
   }
@@ -55,6 +68,7 @@ class Acl {
     bypassHostnames.clear()
     proxyHostnames.clear()
     this.subnets.clear()
+    urls.clear()
     bypass = defaultBypass
     lazy val bypassSubnets = new mutable.SortedList[Subnet]()
     lazy val proxySubnets = new mutable.SortedList[Subnet]()
@@ -62,7 +76,12 @@ class Acl {
     var subnets: mutable.SortedList[Subnet] = if (defaultBypass) proxySubnets else bypassSubnets
     for (line <- value.getLines()) (line.indexOf('#') match {
       case -1 => line
-      case index => line.substring(0, index)  // trim comments
+      case index =>
+        line.substring(index + 1) match {
+          case networkAclParser(url) => urls.add(new URL(url))
+          case _ => // ignore
+        }
+        line.substring(0, index)  // trim comments
     }).trim match {
       case "[outbound_block_list]" =>
         hostnames = null
@@ -85,6 +104,23 @@ class Acl {
   }
   final def fromId(id: String): Acl = fromSource(Source.fromFile(Acl.getFile(id)))
 
+  def flatten(depth: Int): Acl = {
+    if (depth > 0) for (url <- urls) {
+      val child = new Acl().fromSource(Source.fromURL(url), bypass).flatten(depth - 1)
+      if (bypass != child.bypass) {
+        Log.w(TAG, "Imported network ACL has a conflicting mode set. This will probably not work as intended. URL: %s"
+          .format(url))
+        child.subnets.clear() // subnets for the different mode are discarded
+        child.bypass = bypass
+      }
+      bypassHostnames ++= child.bypassHostnames
+      proxyHostnames ++= child.proxyHostnames
+      subnets ++= child.subnets
+    }
+    urls.clear()
+    this
+  }
+
   override def toString: String = {
     val result = new StringBuilder()
     result.append(if (bypass) "[bypass_all]\n" else "[proxy_all]\n")
@@ -101,10 +137,9 @@ class Acl {
       result.append(proxyList.mkString("\n"))
       result.append('\n')
     }
+    result.append(urls.map("#IMPORT_URL <%s>\n".format(_)).mkString)
     result.toString
   }
-
-  def isValidCustomRules: Boolean = bypass && bypassHostnames.isEmpty
 
   // Don't change: dummy fields for OrmLite interaction
 
@@ -120,6 +155,7 @@ class Acl {
 }
 
 object Acl {
+  final val TAG = "Acl"
   final val ALL = "all"
   final val BYPASS_LAN = "bypass-lan"
   final val BYPASS_CHN = "bypass-china"
@@ -127,6 +163,10 @@ object Acl {
   final val GFWLIST = "gfwlist"
   final val CHINALIST = "china-list"
   final val CUSTOM_RULES = "custom-rules"
+  final val CUSTOM_RULES_FLATTENED = "custom-rules-flattened"
+  private val networkAclParser = "^IMPORT_URL\\s*<(.+)>\\s*$".r
+
+  private val urlOrdering: Ordering[URL] = Ordering.by(url => (url.getHost, url.getPort, url.getFile, url.getProtocol))
 
   def getFile(id: String) = new File(app.getFilesDir, id + ".acl")
   def customRules: Acl = {

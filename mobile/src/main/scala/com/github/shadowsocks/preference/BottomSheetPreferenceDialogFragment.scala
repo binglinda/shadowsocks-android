@@ -7,7 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.support.design.widget.BottomSheetDialog
-import android.support.v14.preference.PreferenceDialogFragment
+import android.support.v7.preference.PreferenceDialogFragmentCompat
 import android.support.v7.widget.RecyclerView.ViewHolder
 import android.support.v7.widget.{LinearLayoutManager, RecyclerView}
 import android.view.ViewGroup.LayoutParams
@@ -18,7 +18,7 @@ import com.github.shadowsocks.R
 /**
   * @author Mygod
   */
-final class BottomSheetPreferenceDialogFragment extends PreferenceDialogFragment {
+final class BottomSheetPreferenceDialogFragment extends PreferenceDialogFragmentCompat {
   private lazy val preference = getPreference.asInstanceOf[IconListPreference]
   private lazy val index: Int = preference.selectedEntry
   private lazy val entries: Array[CharSequence] = preference.getEntries
@@ -46,9 +46,9 @@ final class BottomSheetPreferenceDialogFragment extends PreferenceDialogFragment
   private final class IconListViewHolder(val dialog: BottomSheetDialog, view: View) extends ViewHolder(view)
     with View.OnClickListener with View.OnLongClickListener {
     private var index: Int = _
-    private val text1 = view.findViewById(android.R.id.text1).asInstanceOf[TextView]
-    private val text2 = view.findViewById(android.R.id.text2).asInstanceOf[TextView]
-    private val icon = view.findViewById(android.R.id.icon).asInstanceOf[ImageView]
+    private val text1 = view.findViewById[TextView](android.R.id.text1)
+    private val text2 = view.findViewById[TextView](android.R.id.text2)
+    private val icon = view.findViewById[ImageView](android.R.id.icon)
     view.setOnClickListener(this)
     view.setOnLongClickListener(this)
 
