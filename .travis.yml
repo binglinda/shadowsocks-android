@@ -5,7 +5,7 @@ jdk:
 
 env:
     global:
-        - NDK_VERSION=r15b
+        - NDK_VERSION=r16
         - NDK_CCACHE=ccache
         - GOROOT_BOOTSTRAP=$GOROOT
         - ANDROID_NDK_HOME=$HOME/.android/android-ndk-${NDK_VERSION}
@@ -27,7 +27,7 @@ cache:
 android:
     components:
         - tools
-        - build-tools-26.0.0
+        - build-tools-27.0.0
         - extra-android-m2repository
         - extra-google-m2repository
 

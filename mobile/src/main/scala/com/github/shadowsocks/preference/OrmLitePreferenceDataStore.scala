@@ -4,9 +4,10 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util
 
+import android.os.Binder
 import android.support.v7.preference.PreferenceDataStore
 import com.github.shadowsocks.database.{DBHelper, KeyValuePair}
-import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.utils.{Key, Utils}
 
 import scala.collection.JavaConversions._
 
@@ -98,10 +99,21 @@ final class OrmLitePreferenceDataStore(dbHelper: DBHelper) extends PreferenceDat
   def registerChangeListener(listener: OnPreferenceDataStoreChangeListener): Unit = listeners += listener
   def unregisterChangeListener(listener: OnPreferenceDataStoreChangeListener): Unit = listeners -= listener
 
+  // hopefully hashCode = mHandle doesn't change, currently this is true from KitKat to Nougat
+  private lazy val userIndex = Binder.getCallingUserHandle.hashCode
+  private def getLocalPort(key: String, default: Int) = getInt(key, 0) match {
+    case 0 => Utils.parsePort(getString(key), default + userIndex)
+    case value =>
+      putString(key, value.toString)
+      value
+  }
+
   def profileId: Int = getInt(Key.id, 0)
   def profileId_=(i: Int): Unit = putInt(Key.id, i)
-  def isNAT: Boolean = getBoolean(Key.isNAT)
-  def isNAT_=(value: Boolean): Unit = putBoolean(Key.isNAT, value)
+  def serviceMode: String = getString(Key.serviceMode, Key.modeVpn)
+  def portProxy: Int = getLocalPort(Key.portProxy, 1080)
+  def portLocalDns: Int = getLocalPort(Key.portLocalDns, 5450)
+  def portTransproxy: Int = getLocalPort(Key.portTransproxy, 8200)
 
   def proxyApps: Boolean = getBoolean(Key.proxyApps)
   def proxyApps_=(value: Boolean): Unit = putBoolean(Key.proxyApps, value)
@@ -113,4 +125,12 @@ final class OrmLitePreferenceDataStore(dbHelper: DBHelper) extends PreferenceDat
   def plugin_=(value: String): Unit = putString(Key.plugin, value)
   def dirty: Boolean = getBoolean(Key.dirty)
   def dirty_=(value: Boolean): Unit = putBoolean(Key.dirty, value)
+
+  def initGlobal() {
+    // temporary workaround for support lib bug
+    if (getString(Key.serviceMode) == null) putString(Key.serviceMode, serviceMode)
+    if (getString(Key.portProxy) == null) putString(Key.portProxy, portProxy.toString)
+    if (getString(Key.portLocalDns) == null) putString(Key.portLocalDns, portLocalDns.toString)
+    if (getString(Key.portTransproxy) == null) putString(Key.portTransproxy, portTransproxy.toString)
+  }
 }

@@ -23,11 +23,10 @@ package com.github.shadowsocks.database
 import java.util.Locale
 
 import android.net.Uri
-import android.os.Binder
 import android.util.Base64
 import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.preference.OrmLitePreferenceDataStore
-import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.utils.{Key, Utils}
 import com.j256.ormlite.field.{DataType, DatabaseField}
 
 class Profile {
@@ -39,10 +38,6 @@ class Profile {
 
   @DatabaseField
   var host: String = "198.199.101.152"
-
-  // hopefully hashCode = mHandle doesn't change, currently this is true from KitKat to Nougat
-  @DatabaseField
-  var localPort: Int = 1080 + Binder.getCallingUserHandle.hashCode
 
   @DatabaseField
   var remotePort: Int = 8388
@@ -111,8 +106,7 @@ class Profile {
   def serialize(store: OrmLitePreferenceDataStore) {
     store.putString(Key.name, name)
     store.putString(Key.host, host)
-    store.putInt(Key.localPort, localPort)
-    store.putInt(Key.remotePort, remotePort)
+    store.putString(Key.remotePort, remotePort.toString)
     store.putString(Key.password, password)
     store.putString(Key.route, route)
     store.putString(Key.remoteDns, remoteDns)
@@ -129,8 +123,7 @@ class Profile {
     // It's assumed that default values are never used, so 0/false/null is always used even if that isn't the case
     name = store.getString(Key.name, null)
     host = store.getString(Key.host, null)
-    localPort = store.getInt(Key.localPort, 0)
-    remotePort = store.getInt(Key.remotePort, 0)
+    remotePort = Utils.parsePort(store.getString(Key.remotePort), 8388, 1)
     password = store.getString(Key.password, null)
     method = store.getString(Key.method, null)
     route = store.getString(Key.route, null)

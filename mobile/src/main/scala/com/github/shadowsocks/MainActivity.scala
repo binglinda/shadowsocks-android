@@ -21,19 +21,19 @@
 package com.github.shadowsocks
 
 import java.lang.System.currentTimeMillis
-import java.net.{HttpURLConnection, URL}
+import java.net.{HttpURLConnection, InetSocketAddress, URL, Proxy => JavaProxy}
 import java.util.Locale
 
+import android.app.Activity
 import android.app.backup.BackupManager
-import android.app.{Activity, ProgressDialog}
 import android.content._
 import android.net.{Uri, VpnService}
 import android.nfc.{NdefMessage, NfcAdapter}
-import android.os.{Build, Bundle, Handler, Message}
+import android.os.{Bundle, Handler}
 import android.support.customtabs.CustomTabsIntent
 import android.support.design.widget.{FloatingActionButton, Snackbar}
 import android.support.v4.content.ContextCompat
-import android.support.v7.app.AlertDialog
+import android.support.v7.app.{AlertDialog, AppCompatActivity}
 import android.support.v7.content.res.AppCompatResources
 import android.support.v7.preference.PreferenceDataStore
 import android.support.v7.widget.RecyclerView.ViewHolder
@@ -45,6 +45,7 @@ import com.github.jorgecastilloprz.FABProgressCircle
 import com.github.shadowsocks.ShadowsocksApplication.app
 import com.github.shadowsocks.acl.{Acl, CustomRulesFragment}
 import com.github.shadowsocks.aidl.IShadowsocksServiceCallback
+import com.github.shadowsocks.bg.{Executable, ServiceState, TrafficMonitor}
 import com.github.shadowsocks.preference.OnPreferenceDataStoreChangeListener
 import com.github.shadowsocks.utils.CloseUtils.autoDisconnect
 import com.github.shadowsocks.utils._
@@ -61,13 +62,14 @@ object MainActivity {
 
   private final val DRAWER_PROFILES = 0L
   private final val DRAWER_GLOBAL_SETTINGS = 1L
-  private final val DRAWER_RECOVERY = 2L
   private final val DRAWER_ABOUT = 3L
   private final val DRAWER_FAQ = 4L
   private final val DRAWER_CUSTOM_RULES = 5L
+
+  var stateListener: Int => Unit = _
 }
 
-class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawerItemClickListener
+class MainActivity extends AppCompatActivity with ServiceBoundContext with Drawer.OnDrawerItemClickListener
   with OnPreferenceDataStoreChangeListener {
   import MainActivity._
 
@@ -109,74 +111,66 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
   }
   private def changeState(s: Int, profileName: String = null, m: String = null) {
     s match {
-      case State.CONNECTING =>
+      case ServiceState.CONNECTING =>
         fab.setImageResource(R.drawable.ic_start_busy)
         fabProgressCircle.show()
         statusText.setText(R.string.connecting)
-      case State.CONNECTED =>
-        if (state == State.CONNECTING) fabProgressCircle.beginFinalAnimation()
+      case ServiceState.CONNECTED =>
+        if (state == ServiceState.CONNECTING) fabProgressCircle.beginFinalAnimation()
         else fabProgressCircle.postDelayed(hideCircle, 1000)
         fab.setImageResource(R.drawable.ic_start_connected)
-        statusText.setText(if (app.isNatEnabled) R.string.nat_connected else R.string.vpn_connected)
-      case State.STOPPING =>
+        statusText.setText(R.string.vpn_connected)
+      case ServiceState.STOPPING =>
         fab.setImageResource(R.drawable.ic_start_busy)
-        if (state == State.CONNECTED) fabProgressCircle.show()  // ignore for stopped
+        if (state == ServiceState.CONNECTED) fabProgressCircle.show()  // ignore for stopped
         statusText.setText(R.string.stopping)
       case _ =>
         fab.setImageResource(R.drawable.ic_start_idle)
         fabProgressCircle.postDelayed(hideCircle, 1000)
         if (m != null) {
-          val snackbar = Snackbar.make(findViewById(R.id.snackbar),
-            getString(R.string.vpn_error).formatLocal(Locale.ENGLISH, m), Snackbar.LENGTH_LONG)
-          if (m == getString(R.string.nat_no_root)) addDisableNatToSnackbar(snackbar)
-          snackbar.show()
+          Snackbar.make(findViewById(R.id.snackbar),
+            getString(R.string.vpn_error).formatLocal(Locale.ENGLISH, m), Snackbar.LENGTH_LONG).show()
           Log.e(TAG, "Error to start VPN service: " + m)
         }
         statusText.setText(R.string.not_connected)
     }
     state = s
-    if (state == State.CONNECTED) fab.setBackgroundTintList(greenTint) else {
+    if (state == ServiceState.CONNECTED) fab.setBackgroundTintList(greenTint) else {
       fab.setBackgroundTintList(greyTint)
       updateTraffic(-1, 0, 0, 0, 0)
       testCount += 1  // suppress previous test messages
     }
     if (ProfilesFragment.instance != null)
       ProfilesFragment.instance.profilesAdapter.notifyDataSetChanged()  // refresh button enabled state
+    if (stateListener != null) stateListener(s)
     fab.setEnabled(false)
-    if (state == State.CONNECTED || state == State.STOPPED)
-      handler.postDelayed(() => fab.setEnabled(state == State.CONNECTED || state == State.STOPPED), 1000)
+    if (state == ServiceState.CONNECTED || state == ServiceState.STOPPED)
+      handler.postDelayed(() => fab.setEnabled(state == ServiceState.CONNECTED || state == ServiceState.STOPPED), 1000)
   }
   def updateTraffic(profileId: Int, txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) {
     txText.setText(TrafficMonitor.formatTraffic(txTotal))
     rxText.setText(TrafficMonitor.formatTraffic(rxTotal))
     txRateText.setText(TrafficMonitor.formatTraffic(txRate) + "/s")
     rxRateText.setText(TrafficMonitor.formatTraffic(rxRate) + "/s")
-    val child = getFragmentManager.findFragmentById(R.id.fragment_holder).asInstanceOf[ToolbarFragment]
-    if (state != State.STOPPING && child != null) child.onTrafficUpdated(profileId, txRate, rxRate, txTotal, rxTotal)
+    val child = getSupportFragmentManager.findFragmentById(R.id.fragment_holder).asInstanceOf[ToolbarFragment]
+    if (state != ServiceState.STOPPING && child != null)
+      child.onTrafficUpdated(profileId, txRate, rxRate, txTotal, rxTotal)
   }
 
-  override def onServiceConnected() {
-    changeState(bgService.getState)
-    if (Build.VERSION.SDK_INT >= 21 && app.isNatEnabled) {
-      val snackbar = Snackbar.make(findViewById(R.id.snackbar), R.string.nat_deprecated, Snackbar.LENGTH_LONG)
-      addDisableNatToSnackbar(snackbar)
-      snackbar.show()
-    }
-  }
-  override def onServiceDisconnected(): Unit = changeState(State.IDLE)
-
-  private def addDisableNatToSnackbar(snackbar: Snackbar) = snackbar.setAction(R.string.switch_to_vpn, (_ =>
-    if (state == State.STOPPED) app.dataStore.isNAT = false): View.OnClickListener)
+  override def onServiceConnected(): Unit = changeState(bgService.getState)
+  override def onServiceDisconnected(): Unit = changeState(ServiceState.IDLE)
 
   override def binderDied(): Unit = handler.post(() => {
     detachService()
-    app.crashRecovery()
+    Executable.killAll()
     attachService(callback)
   })
 
   override def onActivityResult(requestCode: Int, resultCode: Int, data: Intent): Unit = resultCode match {
     case Activity.RESULT_OK => Utils.startSsService(this)
-    case _ => Log.e(TAG, "Failed to start VpnService")
+    case _ =>
+      Snackbar.make(findViewById(R.id.snackbar), R.string.vpn_permission_denied, Snackbar.LENGTH_LONG).show()
+      Log.e(TAG, "Failed to start VpnService: %s".formatLocal(Locale.ENGLISH, data))
   }
 
   override def onCreate(savedInstanceState: Bundle) {
@@ -208,12 +202,6 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
           .withIdentifier(DRAWER_FAQ)
           .withName(R.string.faq)
           .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_action_help_outline))
-          .withIconTintingEnabled(true)
-          .withSelectable(false),
-        new PrimaryDrawerItem()
-          .withIdentifier(DRAWER_RECOVERY)
-          .withName(R.string.recovery)
-          .withIcon(AppCompatResources.getDrawable(this, R.drawable.ic_navigation_refresh))
           .withIconTintingEnabled(true)
           .withSelectable(false),
         new PrimaryDrawerItem()
@@ -252,22 +240,27 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
     if (tf != null) title.setTypeface(tf)
 
     if (savedInstanceState == null) displayFragment(new ProfilesFragment)
+    previousPosition = drawer.getCurrentSelectedPosition
     statusText = findViewById(R.id.status).asInstanceOf[TextView]
     txText = findViewById(R.id.tx).asInstanceOf[TextView]
     txRateText = findViewById(R.id.txRate).asInstanceOf[TextView]
     rxText = findViewById(R.id.rx).asInstanceOf[TextView]
     rxRateText = findViewById(R.id.rxRate).asInstanceOf[TextView]
-    findViewById[View](R.id.stat).setOnClickListener(_ => if (state == State.CONNECTED && app.isVpnEnabled) {
+    findViewById[View](R.id.stat).setOnClickListener(_ => if (state == ServiceState.CONNECTED) {
       testCount += 1
       statusText.setText(R.string.connection_test_testing)
       val id = testCount  // it would change by other code
       Utils.ThrowableFuture {
         // Based on: https://android.googlesource.com/platform/frameworks/base/+/master/services/core/java/com/android/server/connectivity/NetworkMonitor.java#640
-        autoDisconnect(new URL("https", app.currentProfile.get.route match {
-          case Acl.CHINALIST => "www.qualcomm.cn"
-          case _ => "www.google.com"
-        }, "/generate_204").openConnection()
-          .asInstanceOf[HttpURLConnection]) { conn =>
+        autoDisconnect {
+          val url = new URL("https", app.currentProfile.get.route match {
+            case Acl.CHINALIST => "www.qualcomm.cn"
+            case _ => "www.google.com"
+          }, "/generate_204")
+          (if (app.usingVpnMode) url.openConnection() else url.openConnection(
+            new JavaProxy(JavaProxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", app.dataStore.portProxy))))
+            .asInstanceOf[HttpURLConnection]
+        } { conn =>
           conn.setConnectTimeout(5 * 1000)
           conn.setReadTimeout(5 * 1000)
           conn.setInstanceFollowRedirects(false)
@@ -299,20 +292,20 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
 
     fab = findViewById(R.id.fab).asInstanceOf[FloatingActionButton]
     fabProgressCircle = findViewById(R.id.fabProgressCircle).asInstanceOf[FABProgressCircle]
-    fab.setOnClickListener(_ => if (state == State.CONNECTED) Utils.stopSsService(this) else Utils.ThrowableFuture {
-      if (app.isNatEnabled) Utils.startSsService(this) else {
+    fab.setOnClickListener(_ => if (state == ServiceState.CONNECTED) Utils.stopSsService(this) else Utils.ThrowableFuture {
+      if (app.usingVpnMode) {
         val intent = VpnService.prepare(this)
         if (intent != null) startActivityForResult(intent, REQUEST_CONNECT)
         else handler.post(() => onActivityResult(REQUEST_CONNECT, Activity.RESULT_OK, null))
-      }
+      } else Utils.startSsService(this)
     })
     fab.setOnLongClickListener(_ => {
-      Utils.positionToast(Toast.makeText(this, if (state == State.CONNECTED) R.string.stop else R.string.connect,
+      Utils.positionToast(Toast.makeText(this, if (state == ServiceState.CONNECTED) R.string.stop else R.string.connect,
         Toast.LENGTH_SHORT), fab, getWindow, 0, getResources.getDimensionPixelOffset(R.dimen.margin_small)).show()
       true
     })
 
-    changeState(State.IDLE) // reset everything to init state
+    changeState(ServiceState.IDLE) // reset everything to init state
     handler.post(() => attachService(callback))
     app.dataStore.registerChangeListener(this)
 
@@ -352,7 +345,7 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
   }
 
   def onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String): Unit = key match {
-    case Key.isNAT => handler.post(() => {
+    case Key.serviceMode => handler.post(() => {
       detachService()
       attachService(callback)
     })
@@ -360,32 +353,23 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
   }
 
   private def displayFragment(fragment: ToolbarFragment) {
-    getFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
+    getSupportFragmentManager.beginTransaction().replace(R.id.fragment_holder, fragment).commitAllowingStateLoss()
     drawer.closeDrawer()
   }
 
+  private var previousPosition: Int = _
   override def onItemClick(view: View, position: Int, drawerItem: IDrawerItem[_, _ <: ViewHolder]): Boolean = {
-    drawerItem.getIdentifier match {
+    if (position == previousPosition) drawer.closeDrawer() else drawerItem.getIdentifier match {
       case DRAWER_PROFILES => displayFragment(new ProfilesFragment)
-      case DRAWER_RECOVERY =>
-        app.track("GlobalConfigFragment", "reset")
-        Utils.stopSsService(this)
-        val dialog = ProgressDialog.show(this, "", getString(R.string.recovering), true, false)
-        val handler = new Handler {
-          override def handleMessage(msg: Message): Unit = if (dialog.isShowing && !isDestroyed) dialog.dismiss()
-        }
-        Utils.ThrowableFuture {
-          app.crashRecovery()
-          app.copyAssets()
-          handler.sendEmptyMessage(0)
-        }
       case DRAWER_GLOBAL_SETTINGS => displayFragment(new GlobalSettingsFragment)
       case DRAWER_ABOUT =>
         app.track(TAG, "about")
         displayFragment(new AboutFragment)
       case DRAWER_FAQ => launchUrl(getString(R.string.faq_url))
       case DRAWER_CUSTOM_RULES => displayFragment(new CustomRulesFragment)
+      case _ => // Ignore
     }
+    previousPosition = position
     true  // unexpected cases will throw exception
   }
 
@@ -393,7 +377,7 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
     super.onResume()
     app.remoteConfig.fetch()
     state match {
-      case State.STOPPING | State.CONNECTING =>
+      case ServiceState.STOPPING | ServiceState.CONNECTING =>
       case _ => hideCircle()
     }
   }
@@ -404,12 +388,10 @@ class MainActivity extends Activity with ServiceBoundContext with Drawer.OnDrawe
   }
 
   override def onBackPressed(): Unit = if (drawer.isDrawerOpen) drawer.closeDrawer() else {
-    val currentFragment = getFragmentManager.findFragmentById(R.id.fragment_holder).asInstanceOf[ToolbarFragment]
+    val currentFragment = getSupportFragmentManager.findFragmentById(R.id.fragment_holder).asInstanceOf[ToolbarFragment]
     if (!currentFragment.onBackPressed())
-      if (currentFragment.isInstanceOf[ProfilesFragment]) super.onBackPressed() else {
-        displayFragment(new ProfilesFragment)
-        drawer.setSelection(DRAWER_PROFILES)
-      }
+      if (currentFragment.isInstanceOf[ProfilesFragment]) super.onBackPressed()
+      else drawer.setSelection(DRAWER_PROFILES)
   }
 
   override def onStop() {

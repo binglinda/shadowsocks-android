@@ -2,13 +2,12 @@
 
 ## Shadowsocks for Android
 
-A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.
+[![Build Status](https://api.travis-ci.org/shadowsocks/shadowsocks-android.svg)](https://travis-ci.org/shadowsocks/shadowsocks-android)
+[![Releases](https://img.shields.io/github/downloads/shadowsocks/shadowsocks-android/total.svg)](https://github.com/shadowsocks/shadowsocks-android/releases)
 
+A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.  
 <a href="https://play.google.com/store/apps/details?id=com.github.shadowsocks"><img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png" height="48"></a>
 
-### CI STATUS
-
-[![Build Status](https://api.travis-ci.org/shadowsocks/shadowsocks-android.svg)](https://travis-ci.org/shadowsocks/shadowsocks-android)
 
 ### PREREQUISITES
 
@@ -18,7 +17,7 @@ A [shadowsocks](http://shadowsocks.org) client for Android, written in Scala.
 * Android SDK
   - Build Tools 26+
   - Android Support Repository and Google Repository (see `build.sbt` for version)
-  - Android NDK r15+
+  - Android NDK r16+
 
 ### BUILD
 

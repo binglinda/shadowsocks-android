@@ -20,35 +20,28 @@
 
 package com.github.shadowsocks
 
-import java.util.GregorianCalendar
-
-import android.app.Activity
 import android.content._
-import android.net.Uri
 import android.os.Bundle
 import android.support.design.widget.Snackbar
 import android.support.v7.widget.RecyclerView.ViewHolder
 import android.support.v7.widget._
 import android.support.v7.widget.helper.ItemTouchHelper
 import android.support.v7.widget.helper.ItemTouchHelper.SimpleCallback
-import android.text.TextUtils
 import android.view.View.OnLongClickListener
 import android.view._
 import android.widget.{LinearLayout, PopupMenu, TextView, Toast}
 import com.github.shadowsocks.ShadowsocksApplication.app
+import com.github.shadowsocks.bg.{ServiceState, TrafficMonitor}
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.utils._
 import com.github.shadowsocks.widget.UndoSnackbarManager
-import com.google.android.gms.ads.{AdRequest, AdSize, NativeExpressAdView}
+import com.google.android.gms.ads.{AdRequest, AdSize, AdView}
 
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
-import scala.util.Random
 
 object ProfilesFragment {
   var instance: ProfilesFragment = _  // used for callback from ProfileManager and stateChanged from MainActivity
-
-  private final val REQUEST_SCAN_QR_CODE = 0
 }
 
 final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClickListener {
@@ -64,12 +57,12 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
     * Is ProfilesFragment editable at all.
     */
   private def isEnabled = getActivity.asInstanceOf[MainActivity].state match {
-    case State.CONNECTED | State.STOPPED => true
+    case ServiceState.CONNECTED | ServiceState.STOPPED => true
     case _ => false
   }
   private def isProfileEditable(id: => Int) = getActivity.asInstanceOf[MainActivity].state match {
-    case State.CONNECTED => id != app.dataStore.profileId
-    case State.STOPPED => true
+    case ServiceState.CONNECTED => id != app.dataStore.profileId
+    case ServiceState.STOPPED => true
     case _ => false
   }
 
@@ -85,10 +78,8 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
     edit.setOnClickListener(_ => startConfig(item.id))
     edit.setOnLongClickListener(cardButtonLongClickListener)
     itemView.setOnClickListener(this)
-    // it will not take effect unless set in code
-    itemView.findViewById[View](R.id.indicator).setBackgroundResource(R.drawable.background_profile)
 
-    private var adView: NativeExpressAdView = _
+    private var adView: AdView = _
 
     {
       val share = itemView.findViewById[View](R.id.share)
@@ -142,23 +133,16 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
           val params =
             new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
           params.gravity = Gravity.CENTER_HORIZONTAL
-          params.setMargins(0, getResources.getDimensionPixelOffset(R.dimen.margin_small), 0, 0)
-          adView = new NativeExpressAdView(getActivity)
+          adView = new AdView(getActivity)
           adView.setLayoutParams(params)
-          adView.setAdUnitId("ca-app-pub-9097031975646651/5224027521")
-          adView.setAdSize(new AdSize(328, 132))
+          adView.setAdUnitId("ca-app-pub-9097031975646651/7760346322")
+          adView.setAdSize(AdSize.FLUID)
+
           itemView.findViewById[LinearLayout](R.id.content).addView(adView)
 
-          // Demographics
-          val random = new Random()
-          val adBuilder = new AdRequest.Builder()
-          adBuilder.setGender(AdRequest.GENDER_MALE)
-          val year = 1975 + random.nextInt(40)
-          val month = 1 + random.nextInt(12)
-          val day = random.nextInt(28)
-          adBuilder.setBirthday(new GregorianCalendar(year, month, day).getTime)
-
           // Load Ad
+          val adBuilder = new AdRequest.Builder()
+          adBuilder.addTestDevice("B08FC1764A7B250E91EA9D0D5EBEB208")
           adView.loadAd(adBuilder.build())
         } else adView.setVisibility(View.VISIBLE)
       } else if (adView != null) adView.setVisibility(View.GONE)
@@ -170,7 +154,7 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
       app.switchProfile(item.id)
       profilesAdapter.refreshId(old)
       itemView.setSelected(true)
-      if (activity.state == State.CONNECTED) Utils.reloadSsService(activity)
+      if (activity.state == ServiceState.CONNECTED) Utils.reloadSsService(activity)
     }
 
     override def onMenuItemClick(menu: MenuItem): Boolean = menu.getItemId match {
@@ -281,6 +265,7 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
     val profilesList = view.findViewById[RecyclerView](R.id.list)
     val layoutManager = new LinearLayoutManager(getActivity, LinearLayoutManager.VERTICAL, false)
     profilesList.setLayoutManager(layoutManager)
+    profilesList.addItemDecoration(new DividerItemDecoration(getActivity, layoutManager.getOrientation))
     layoutManager.scrollToPosition(profilesAdapter.profiles.zipWithIndex.collectFirst {
       case (profile, i) if profile.id == app.dataStore.profileId => i
     }.getOrElse(-1))
@@ -341,27 +326,9 @@ final class ProfilesFragment extends ToolbarFragment with Toolbar.OnMenuItemClic
     super.onDestroy()
   }
 
-  override def onActivityResult(requestCode: Int, resultCode: Int, data: Intent): Unit = requestCode match {
-    case REQUEST_SCAN_QR_CODE => if (resultCode == Activity.RESULT_OK) {
-      val contents = data.getStringExtra("SCAN_RESULT")
-      if (!TextUtils.isEmpty(contents)) Parser.findAll(contents).foreach(app.profileManager.createProfile)
-    }
-    case _ => super.onActivityResult(resultCode, resultCode, data)
-  }
-
   def onMenuItemClick(item: MenuItem): Boolean = item.getItemId match {
     case R.id.action_scan_qr_code =>
-      try startActivityForResult(new Intent("com.google.zxing.client.android.SCAN")
-        .addCategory(Intent.CATEGORY_DEFAULT)
-        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_DOCUMENT),
-        REQUEST_SCAN_QR_CODE) catch {
-        case _: ActivityNotFoundException =>
-          startActivity(new Intent(getActivity, classOf[ScannerActivity]))
-        case e: SecurityException =>
-          e.printStackTrace()
-          app.track(e)
-          startActivity(new Intent(getActivity, classOf[ScannerActivity]))
-      }
+      startActivity(new Intent(getActivity, classOf[ScannerActivity]))
       true
     case R.id.action_import =>
       try {
